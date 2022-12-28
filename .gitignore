@@ -1,0 +1,8 @@
+__pycache__/
+*.o
+*.oo
+*.ooo
+*.out
+*.cc
+*.cc.o
+*.cc.o.mjx
