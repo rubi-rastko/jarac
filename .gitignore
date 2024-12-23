@@ -6,3 +6,5 @@ __pycache__/
 *.cc
 *.cc.o
 *.cc.o.mjx
+package.json~
+.zsh_history
