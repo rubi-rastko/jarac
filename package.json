@@ -1,0 +1,8 @@
+{
+    "name": "komputor",
+    "type": "module",
+
+    "dependencies" : {
+	"wbserver" : "file:../weebit/wbserver"
+    }
+}
