@@ -2,164 +2,168 @@ import os
 import socket
 import struct
 import sys
+import logging 
+from src.komputor_conf import *
 
-from multijarac.src.mjconf import *
-
-def get_opcode(mnemonic, itable):
+def opcode( mnemonic, itable ):
     return itable.index(mnemonic) * 0x1000000
 
-def precedence(
-    op, 
-    oplist # type: list
-):
-    for op_set in oplist:
-        for o in op_set:
-            if (o == op):
-                return oplist.index(op_set)
+def prec( op, opconfig ):
+    """Get level of operator in operator sets configuration.
+    """
+    for oplevel in opconfig:        
+        if (op in oplevel):
+            return opconfig.index(oplevel)
 
     return 0
 
-def shuntingyard(   # type: int
-    xi, # type: str # FIXME NAME
-    ol  # FIXME NAME
-):
-    so = [" "] # FIXME NAME
-    xo = "" # FIXME NAME
-    last_op = ""
+def postfix( infix, opconfig ):
+    stack = [" "]
+    expression = ""
+    last = ""
 
-    for a in xi:
-        if (a.isalnum()):
-            xo += " " + a
-        elif (a in ["*", "/", "+", "-"]):
-            if (so):
-                last_op = so[-1]
+    for symbol in infix:
+        if (symbol.isalnum()):
+            expression += " " + symbol
+        elif (symbol in ["*", "/", "+", "-"]):
+            if (stack):
+                last = stack[-1]
+                #last = stack.pop()
 
             while (
                 (
-                    precedence(a, ol) == precedence(last_op, ol) or
-                    precedence(a, ol) > precedence(last_op, ol)
-                ) and last_op != "("
+                    prec(symbol, opconfig) == prec(last, opconfig) or
+                    prec(symbol, opconfig) > prec(last, opconfig)
+                ) and last != "("
             ):
-                xo += " " + last_op
+                expression += " " + last
 
-                if (so):
-                    so.pop()
+                if (stack):
+                    stack.pop()
+                    #last = stack.pop()
 
-                    if (so):
-                        last_op = so[-1]
+                    if (stack):
+                        last = stack[-1]
             
-            so.append(a)
-        elif (a in ["("]):
-            so.append(a)
-        elif (a in [")"]):
-            if (so):
-                last_op = so[-1]           
+            stack.append(symbol)
+        elif (symbol in ["("]):
+            stack.append(symbol)
+        elif (symbol in [")"]):
+            if (stack):
+                last = stack[-1]
+                #last = stack.pop()
 
-            while (last_op != "("):
-                xo += " " + last_op                
+            while (last != "("):
+                expression += " " + last                
 
-                if (so):
-                    so.pop()
-                    if (so):
-                        last_op = so[-1]
+                if (stack):
+                    stack.pop()
+                    #last = stack.pop()
+                    
+                    if (stack):
+                        last = stack[-1]
 
-            if (so):
-                so.pop()
-    if (so):
-        last_op = so[-1]
+            if (stack):
+                stack.pop()
 
-    while (len(so)):
-        xo += " " + last_op
-        so.pop()
+    if (stack):
+        last = stack[-1]
+        #last = stack.pop()
 
-        if (so):
-            last_op = so[-1]
+    while (len(stack)):
+        expression += " " + last
+        stack.pop()
 
-    return xo
+        if (stack):
+            last = stack[-1]
 
-def reversepolish(temp, malist, rpnexpr):
-    asmops = []
-    vrstack = []
+    return expression
+
+def asm(temp, memmap, expression):
+    asm = []
+    stack = []
     lplh = ""
     rplh = ""
 
-    for tok in rpnexpr:
-        if (tok in ["*", "/", "+", "-"]):
-            rplh = malist.index(vrstack[-1])
-            vrstack.pop()
-            lplh = malist.index(vrstack[-1])
-            vrstack.pop()
-
-            asmops.append(mnemonics[opcode.MVA] + " " + str(lplh))
-
-            asmops.append(
+    for t in expression:
+        if (t in ["*", "/", "+", "-"]):
+            rplh = memmap.index(stack[-1])
+            stack.pop()
+            lplh = memmap.index(stack[-1])
+            stack.pop()
+            asm.append(OPMNEM[OPENUM.MVA] + " " + str(lplh))
+            asm.append(
                 [
-                    mnemonics[opcode.MUL], 
-                    mnemonics[opcode.DIV], 
-                    mnemonics[opcode.ADD], 
-                    mnemonics[opcode.SUB]
+                    OPMNEM[OPENUM.MUL], 
+                    OPMNEM[OPENUM.DIV], 
+                    OPMNEM[OPENUM.ADD], 
+                    OPMNEM[OPENUM.SUB]
                 ][
-                    ["*", "/", "+", "-"].index(tok)
+                    ["*", "/", "+", "-"].index(t)
                 ] + " " + str(rplh)
             )
-            asmops.append(mnemonics[opcode.MVM] + " " + str(malist.index(temp)))
-            vrstack.append(temp)
-        elif (str(tok).isalpha()):
-            vrstack.append(tok)
-        elif (str(tok).isnumeric()):
-            asmops.append(tok)
-            vrstack.append(tok)
+            asm.append(OPMNEM[OPENUM.MVM] + " " + str(memmap.index(temp)))
+            stack.append(temp)
+        elif (str(t).isalpha()):
+            stack.append(t)
+        elif (str(t).isnumeric()):
+            asm.append(t)
+            stack.append(t)
 
-    return asmops
+    return asm
 
 
-def tokenize(statement, malist, oplist, fd):
-    ma = malist
+def tokenize(statement, memmap, opconfig):
+    """Tokenize is the HLL syntax processor, and also its
+    definition/reference implementation.
+    """
+    mmap = memmap
+    expression = ""
+    lhand = ""
+    rhand = ""
+    output = ""
 
-    t = ""
-    texpr = ""
-    lefthand = ""
-    righthand = ""
-
-    t = statement
-    texpr = str(t).split("=")
-    lefthand = ''.join([c for c in texpr[0] if c.isalpha()])
-    righthand = texpr[1]
+    
+    expression = str(statement).split("=")
+    lhand = ''.join([c for c in expression[0] if c.isalpha()])
+    rhand = expression[1]
 
     try:
-        ma.index(lefthand)
+        mmap.index(lhand)        
     except ValueError as exc:     
-        ma.append(lefthand)
+        mmap.append(lhand)
 
-    for oto in reversepolish(lefthand, ma, shuntingyard(righthand, oplist)):
-        fd.write(oto + "\n")
+    for symbol in asm(lhand, mmap, postfix(rhand, opconfig)):
+        output += symbol + "\n"
+        
+    return output
 
 
 def mj_compile(sourcepath):
     # --- COMPILER ---
     # https://open.spotify.com/track/5oD2Z1OOx1Tmcu2mc9sLY2?si=561abda035bc4c6a
-    memory_map = []
 
-    # operator precedence
-    op_list = [
-        ["*", "/"],
-        ["+", "-"],
-        [" "]
-    ]
+    memmap = [] # we call this in a loop, so each iteration depends on the accumulation of values!
+    expressions = []
+    output = ""
 
-    with open(sourcepath, "r") as cin, open(f'{sourcepath}.cc', "w") as cout:
+    with open(f'{sourcepath}.vmt', "r") as cin:
         # ident -> address (offset)
 
         statement = cin.readline()
         
         while (statement):
-            tokenize(statement, memory_map, op_list, cout)
-            statement = cin.readline()
+            output += tokenize(statement, memmap, OPERATOR_PRECEDENCE)
+            statement = cin.readline()    
 
+    with open(f'{sourcepath}.asm', "w") as cout:
+        cout.write( output )
         cout.write("HLT 0\n")
 
 
 def mj_assemble(sourcepath):
+    """Assembler compiles assembly code into machine code.
+    """
     # --- ASSEMBLER ---
     # OPCODE := INTEGER
     # ADDRESS := INTEGER
@@ -170,7 +174,7 @@ def mj_assemble(sourcepath):
 
     asmascii = ""
 
-    with open(sourcepath, "r") as cin, open(f'{sourcepath}.o', "w+b") as bout:
+    with open(f'{sourcepath}.asm', "r") as cin, open(f'{sourcepath}.o', "w+b") as bout:
         asmascii = cin.readline()
 
         while (asmascii):
@@ -183,7 +187,7 @@ def mj_assemble(sourcepath):
                     bytes(
                         struct.pack(
                             "I", # TODO byte order
-                            get_opcode(mnemonic, mnemonics) +
+                            opcode(mnemonic, OPMNEM) +
                             int(address)))
                 )
 
@@ -211,12 +215,12 @@ def mj_linker(objectpath):
 
     # --- LINKER ---
     data_separator = 0x00000000 # type: int
-    absolute_xset = 0 # type: int
+    absolute_offset = 0 # type: int
     bufsize = 4
 
     with (
-        open(objectpath, "r+b") as buf_in, 
-        open(f'{objectpath}.mjx', "w+b") as bout
+        open(f'{objectpath}.o', "r+b") as buf_in, 
+        open(f'{objectpath}.out', "w+b") as bout
     ):
         instr = buf_in.read(4)
 
@@ -226,12 +230,12 @@ def mj_linker(objectpath):
             bout.write(
                 struct.pack( # NOTE must use pack to handle multibyte values
                     "I", # must be 32-bits
-                    instr + absolute_xset
+                    instr + absolute_offset
                 )
             )
             
             if (instr == data_separator):
-                absolute_xset = OFFSET_DATA
+                absolute_offset = OFFSET_DATA
 
             instr = buf_in.read(bufsize)
 
@@ -242,8 +246,8 @@ if __name__ == "__main__":
         source_code = sys.argv[1]
 
         mj_compile(source_code)
-        mj_assemble(source_code + ".cc")
-        mj_linker(source_code + ".cc.o")
+        mj_assemble(source_code)
+        mj_linker(source_code)
     except Exception as exc:
         print(f"\tERROR ----\n{exc}")
         

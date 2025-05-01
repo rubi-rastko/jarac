@@ -17,8 +17,14 @@ MASK_INDEX =    0x00F00000
 MASK_INSTR =    0xFF000000
 MASK_ADDRESS =  0x0000FFFF
 
-mnemonics = 'NOP ADD SUB MUL DIV ADF SUF MVA MVM CLR NEG JNE JZE JMP IDX TRS HLT'.split()
-opcode = enum.IntEnum(
+OPMNEM = 'NOP ADD SUB MUL DIV ADF SUF MVA MVM CLR NEG JNE JZE JMP IDX TRS HLT'.split()
+OPENUM = enum.IntEnum(
     'opcode', 
     'ADD SUB MUL DIV ADF SUF MVA MVM CLR NEG JNE JZE JMP IDX TRS HLT'
 )
+
+OPERATOR_PRECEDENCE = [
+    ["*", "/"],
+    ["+", "-"],
+    [" "]
+]

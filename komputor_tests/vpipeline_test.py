@@ -22,8 +22,8 @@ from src.komputor_conf import OPMNEM, OPENUM, MASK_INDIRECT, MASK_INDEX, MASK_RE
 class Test_MultiJarac(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.SOURCE_CODE = "komputor_tests/srctest.vmt"
-        cls.BOOT_DISK_PATH = "komputor_tests/srctest.vmt.cc.o.mjx"
+        cls.SOURCE_CODE = "komputor_tests/srctest"
+        cls.BOOT_DISK_PATH = "komputor_tests/srctest.out"
         cls.testmem = []
         cls.teststate = dict()
         super().setUpClass()
@@ -133,20 +133,30 @@ class Test_MultiJarac(unittest.TestCase):
         """
         testmem = [0] * 256
         
-        with open("komputor_tests/srctest.vmt.cc.o.mjx", "r+b") as xf:
+        #mj_compile(f'{self.SOURCE_CODE}')
+        #mj_assemble(self.SOURCE_CODE)
+        #mj_linker(self.SOURCE_CODE)
+        
+        with open("komputor_tests/srctest.out", "r+b") as xf:
             mj_load(testmem, xf)
 
         # Code byte at OFFSET_CODE must be a valid instruction
         self.assertNotEqual(testmem[OFFSET_CODE], 0)       
 
     def test_compiler(self):
-        mj_compile(self.SOURCE_CODE)
+        """Test compilation routine.
+        """
+        mj_compile(f'{self.SOURCE_CODE}')
 
     def test_assembler(self):
-        mj_assemble(self.SOURCE_CODE + ".cc")
+        """Test assembler routine.
+        """
+        mj_assemble(self.SOURCE_CODE)
 
     def test_linker(self):
-        mj_linker(self.SOURCE_CODE + ".cc.o")
+        """Test linker routine.
+        """
+        mj_linker(self.SOURCE_CODE)
         # assert files exist
 
     def test_pipeline(self):

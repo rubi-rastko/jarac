@@ -6,7 +6,7 @@ import time
 import struct
 import socket as ipc
 
-from multijarac.src.mjconf import *
+from src.komputor_conf import *
 
 # TODO --- MAJOR ---
 #
@@ -23,31 +23,14 @@ from multijarac.src.mjconf import *
 # TODO imperativefy - minimize ACTUAL function calls (jumps)
 # TODO become one with everything
 
-
-# We MUST reserve real memory for a VM
-vmem = [0] * MEMORY_SIZE
-# Machine state (currently a dict for 
-# compatibility with JSON)
-vstate = { 
-    "ARM": 0, # type: int # SHORT
-    "PRM": 0, # type: int # LONG
-    "RN": 0, # type: int # LONG
-    "XN": [0] * 15,
-    "BN": 0, # type: int # SHORT
-    "AK": 0 # type: int # LONG
-}
-
 def ctz(v):
-    """ Count trailing zeros. 
+    """Count trailing zeros. 
     
     A low-level boolean function.
-    
-    Certain integrated chips have a
-    specialized instruction for it.
 
-    If you want to use the real one, create a
-    separate mj_decode_XXX method, and
-    remap mj_decode to use that one.
+    Generic version as a replacement for
+    a hardware instruction (most chips have
+    a hardware implementation)   
     """
     n = 0
     x = v
@@ -75,154 +58,148 @@ def ctz(v):
 
     return n
 
-def mj_dir(ireg, mask):
+def mj_idecode(ireg, mask):
+    """Decode instruction.
+    """
     return (ireg & mask) >> ctz(mask)
 
-def mj_iprepare(memory, state):
-    # TODO change these to match names in comments
-    # BN = (Instruction) Counter register
-    # ARM = Memory (register) address register; where to write
-    # PRM = Memory (register) value register; what to write
-    # RN = Instruction register
-    # XN = Indexing register
+def mj_iprep(memory, regs):
+    """Instruction execution preparation.
 
-    # NOTE state keys must be guaranteed at this point
-
-    # Write count register to mema register
-    state["ARM"] = state["BN"] 
-    # Write MEMORY[mema] to memv register
-    state["PRM"] = memory[state["ARM"]] 
-    # Write memv to instr register
-    state["RN"] = state["PRM"] 
+    Pulse-clock alternating phase 1 - prepare instruction.
+    """
+    # NOTE state keys must be guaranteed at this point    
+    regs["ARM"] = regs["BN"] # Write count register to mema register    
+    regs["PRM"] = memory[regs["ARM"]] # Write MEMORY[mema] to memv register
+    regs["RN" ] = regs["PRM"] # Write memv to instr register
     
-    if (mj_dir(state["RN"], MASK_INDEXED)):                 # If Decode CODE address mode yields Indexed
-        idx = mj_dir(state["RN"], MASK_INDEX)
-        state["RN"] += state["XN"][idx]                                     #   Write Decode XN[Decode CODE index] to RN incremented
-    elif (mj_dir(state["RN"], MASK_RELATIVE)):             # Else If Decode CODE address mode yields RelativeIndexed
-        state["RN"] += state["ARM"]                                         # NOTE op-assign
+    if (mj_idecode(regs["RN"], MASK_INDEXED)):                 # If Decode CODE address mode yields Indexed
+        idx = mj_idecode(regs["RN"], MASK_INDEX)
+        regs["RN" ] += regs["XN"][idx]                                     #   Write Decode XN[Decode CODE index] to RN incremented
+    elif (mj_idecode(regs["RN"], MASK_RELATIVE)):             # Else If Decode CODE address mode yields RelativeIndexed
+        regs["RN" ] += regs["ARM"]                                         # NOTE op-assign
 
-    while (mj_dir(state["RN"], MASK_INDIRECT)):            # While Decode CODE address mode yields Indirect
-        state["ARM"] = mj_dir(state["RN"], MASK_ADDRESS)    #   Decode CODE address, Write to ARM
-        state["PRM"] = memory[state["ARM"]]                                 # NOTE will raise exception #  Write MEMORY[ARM] to PRM
-        state["RN"] &= MASK_INSTR                                           # NOTE bitop-assign #  Write RN & CODE instruction to RN # (but clear address)
-        state["RN"] += state["PRM"] & 0x00FFFFFF                            #   Write PRM & 0x00FFFFFF to RN incremented
+    while (mj_idecode(regs["RN"], MASK_INDIRECT)):            # While Decode CODE address mode yields Indirect
+        regs["ARM"] = mj_idecode(regs["RN"], MASK_ADDRESS)    #   Decode CODE address, Write to ARM
+        regs["PRM"] = memory[regs["ARM"]]                                 # NOTE will raise exception #  Write MEMORY[ARM] to PRM
+        regs["RN" ] &= MASK_INSTR                                           # NOTE bitop-assign #  Write RN & CODE instruction to RN # (but clear address)
+        regs["RN" ] += regs["PRM"] & 0x00FFFFFF                            #   Write PRM & 0x00FFFFFF to RN incremented
     
-        if (mj_dir(state["RN"], MASK_INDEXED)):             # If Decode CODE address mode yields Indexed
-            idx = mj_dir(state["RN"], MASK_INDEX)
-            state["RN"] += state["XN"][idx]                                 #   Write Decode XN[Decode CODE index] to RN incremented
-        elif (mj_dir(state["RN"], MASK_RELATIVE)):         # Else If Decode CODE address mode yields RelativeIndexed
-            state["RN"] += state["ARM"]                                     # NOTE op-assign
+        if (mj_idecode(regs["RN"], MASK_INDEXED)):             # If Decode CODE address mode yields Indexed
+            idx = mj_idecode(regs["RN"], MASK_INDEX)
+            regs["RN"] += regs["XN"][idx]                                 #   Write Decode XN[Decode CODE index] to RN incremented
+        elif (mj_idecode(regs["RN"], MASK_RELATIVE)):         # Else If Decode CODE address mode yields RelativeIndexed
+            regs["RN"] += regs["ARM"]                                     # NOTE op-assign
 
     # Increment BN
-    state["BN"] += 1 
+    regs["BN"] += 1 
     
     # TODO Set clock to downtick (TODO clock)
     
     return 0
 
 
-def mj_iexecute(mem, state):
+def mj_iexec(memory, regs):
+    """Instruction execution execution.
+
+    Pulse-clock alternating phase 2 - execute instruction.
+    """
     # NOTE state keys must be guaranteed at this point
-    instr = mj_dir(state["RN"], MASK_INSTR)
-    addr = mj_dir(state["RN"], MASK_ADDRESS)
+    instr = mj_idecode(regs["RN"], MASK_INSTR)
+    addr = mj_idecode(regs["RN"], MASK_ADDRESS)
 
     # Switch on I # PERF python doesn't have switch    
-    if (instr == opcode.HLT):
+    if (instr == OPENUM.HLT):
         return 0
-    elif (instr == opcode.ADD): # arithmetic -----------------------
-        state["AK"] += mem[addr]
+    elif (instr == OPENUM.ADD): # arithmetic -----------------------
+        regs["AK"] += memory[addr]
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.SUB):
-        state["AK"] -= mem[addr]
+    elif (instr == OPENUM.SUB):
+        regs["AK"] -= memory[addr]
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.MUL):
-        state["AK"] *= mem[addr]
+    elif (instr == OPENUM.MUL):
+        regs["AK"] *= memory[addr]
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.DIV):
-        state["AK"] /= mem[addr]
+    elif (instr == OPENUM.DIV):
+        regs["AK"] /= memory[addr]
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.ADF): # TODO floating point arithmetic ---
-        state["AK"] += mem[addr]
+    elif (instr == OPENUM.ADF): # TODO floating point arithmetic ---
+        regs["AK"] += memory[addr]
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.SUF):
-        state["AK"] -= mem[addr]
+    elif (instr == OPENUM.SUF):
+        regs["AK"] -= memory[addr]
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.MVA): # Read from memory -----------------
-        state["AK"] = mem[addr]
+    elif (instr == OPENUM.MVA): # Read from memory -----------------
+        regs["AK"] = memory[addr]
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.MVM): # Write to memory ------------------
-        mem[addr] = state["AK"]
+    elif (instr == OPENUM.MVM): # Write to memory ------------------
+        memory[addr] = regs["AK"]
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.CLR): # Clear acc register ---------------
-        state["AK"] = 0x0
+    elif (instr == OPENUM.CLR): # Clear acc register ---------------
+        regs["AK"] = 0x0
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.NEG): # Invert acc register --------------
-        state["AK"] = -state["AK"] # FIXME Syntax, style
+    elif (instr == OPENUM.NEG): # Invert acc register --------------
+        regs["AK"] = -regs["AK"] # FIXME Syntax, style
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.JNE): # Conditional jump (acc < 0) -------
-        if (state["AK"] < 0x0):
-            state["BN"] = addr
+    elif (instr == OPENUM.JNE): # Conditional jump (acc < 0) -------
+        if (regs["AK"] < 0x0):
+            regs["BN"] = addr
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.JZE): # Conditional jump (acc == 0) ------
-        if (state["AK"] == 0x0):
-            state["BN"] = addr
+    elif (instr == OPENUM.JZE): # Conditional jump (acc == 0) ------
+        if (regs["AK"] == 0x0):
+            regs["BN"] = addr
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.JMP): # Unconditional jump ---------------
-        state["BN"] = addr
+    elif (instr == OPENUM.JMP): # Unconditional jump ---------------
+        regs["BN"] = addr
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.IDX): # Indexed memory address -----------
-        idx = mj_dir(state["RN"], MASK_INDEX)
-        state["XN"][idx] = addr
+    elif (instr == OPENUM.IDX): # Indexed memory address -----------
+        idx = mj_idecode(regs["RN"], MASK_INDEX)
+        regs["XN"][idx] = addr
         return 1 # NOTE in place of switch BREAK!
-    elif (instr == opcode.TRS): # Subroutine (Jump + Decode) -------
-        state["RN"] = state["RN"] & (0xFFFF0000 + state["BN"])
-        state["BN"] = 0x1 + addr
+    elif (instr == OPENUM.TRS): # Subroutine (Jump + Decode) -------
+        regs["RN"] = regs["RN"] & (0xFFFF0000 + regs["BN"])
+        regs["BN"] = 0x1 + addr
         return 1 # NOTE in place of switch BREAK!
     else: # illegal instruction ------------------------------------        
         return -1
 
     # TODO Set clock to uptick (TODO clock)
     
-    return 1
+    return 1 # 1 = success (so far only code)
 
-def mj_dump(memory, blocksize):
+def mj_dump(memory, nbytes):
     # TODO use the logger
     instr = None
-    segment = max(4096, blocksize)
-    sout = ""
+    segment = min(4096, nbytes)
+    output_buffer = ""
 
-    # For A in range DATA offset, blocksize
-    for i in range(OFFSET_DATA, OFFSET_DATA + segment):
-        #   Write A, MEMORY[A] to output
-        sout += (
+    for i in range(OFFSET_DATA, OFFSET_DATA + segment): # For A in range DATA offset, blocksize
+        output_buffer += ( # Write A, MEMORY[A] to output
             ' %(addr)04X:   %(val)08X\n' %
             { "addr": i, "val": memory[i] }
         )
 
-    # For A in range 0, blocksize
-    for i in range(0, segment):
-        #   Decode instruction and paramater address
-        instr = mj_dir(memory[i], MASK_INSTR)
-        caddr = mj_dir(memory[i], MASK_ADDRESS)
+    for i in range(0, segment): # For A in range 0, blocksize
+        instr = mj_idecode(memory[i], MASK_INSTR) #   Decode instruction and paramater address
+        caddr = mj_idecode(memory[i], MASK_ADDRESS)
         
-        #   Write A+CODE offset, instruction mnemonic, instruction address 
-        sout += (
+        output_buffer += ( # Write A+CODE offset, instruction mnemonic, instruction address 
             ' %(addr)04X: %(instr)3.3s 0x%(caddr)04X\n' %
             { 
                 "addr": OFFSET_CODE + i,
-                "instr": mnemonics[instr],
+                "instr": OPMNEM[instr],
                 "caddr": caddr
             }
         )
         
-    return sout
+    return output_buffer
 
 
-def mj_load(mem, fd):
+def mj_load(memory, fd):
     # TODO This should be a native program
     # TODO Read from IPC socket?
-    cbytes = 0
-    dbytes = 0
+    code_bytes = 0
+    data_bytes = 0
 
     # The role of the program loader is to
     # work around a catch-22 where the program
@@ -237,43 +214,31 @@ def mj_load(mem, fd):
     # the machine has over programs, i.e.
     # make binaries more self-sufficient
     
-    codebytebuf = fd.read(4)
+    code_byte = fd.read(4)
+    
+    while (code_byte != b''): # While (Read instruction yields)
+        code_byte = int.from_bytes(code_byte, 'little') # Normalize instruction endianness
 
-    # While (Read instruction yields)
-    while (codebytebuf != b''): 
-        # Normalize instruction endianness
-        codebytebuf = int.from_bytes(codebytebuf, 'little')
-
-        # If (Decode instruction yields DATA)
-        if (mj_dir(codebytebuf, MASK_INSTR) == 0):            
-            #           Commit DATA to memory starting at DATA offset
-            mem[OFFSET_DATA + dbytes] = codebytebuf
-            #           Increment DATA unit counter
-            dbytes += 1
-            #           Else (yields CODE)
-        else:
-            #           Commit CODE to memory starting at CODE offset
-            mem[0 + cbytes] = codebytebuf
-            #           Increment CODE unit counter
-            cbytes += 1
+        if (mj_idecode(code_byte, MASK_INSTR) == 0): # If (Decode instruction yields DATA)
+            memory[OFFSET_DATA + data_bytes] = code_byte # Commit DATA to memory starting at DATA offset            
+            data_bytes += 1 # Increment DATA unit counter
+        else: # else (yields CODE)
+            memory[0 + code_bytes] = code_byte # Commit CODE to memory starting at CODE offset            
+            code_bytes += 1 # Increment CODE unit counter
             
-        codebytebuf = fd.read(4)
+        code_byte = fd.read(4)
+    
+    return code_bytes + data_bytes # Return sum of DATA and CODE counters
 
-    # Return sum of DATA and CODE counters
-    return cbytes + dbytes
+def mj_exec(memory, regs):
+    mj_iprep(memory, regs) # Prepare next instruction
 
-def mj_exec(mem, state):
-    # Prepare next instruction
-    mj_iprepare(mem, state)
-
-    # While (Execute instruction success)
-    while(mj_iexecute(mem, state) > 0): # NOTE > 0 signals we are using a RANGE of return codes
-        # Prepare next instruction
-        mj_iprepare(mem, state)
+    while(mj_iexec(memory, regs) > 0): # While (Execute instruction returns success code)
+        mj_iprep(memory, regs) # Prepare next instruction
 
     return 0;
 
-def mj_bios(mem, state, romfd): # NOTE should also be a native routine
+def mj_bios(memory, regs, fd): # NOTE should also be a native routine
     """ A BIOS-like routine.
     
     Currently just executes a piece of code directly.
@@ -281,16 +246,28 @@ def mj_bios(mem, state, romfd): # NOTE should also be a native routine
     # NOTE "BYTE" IS USED GENERICALLY
     # IT MAY OR MAY NOT REPRESENT AN OCTET OF BITS
 
-    n_bytes = mj_load(mem, romfd)
-    mj_dump(mem, n_bytes)
-    mj_exec(mem, state)
+    nbytes = mj_load(memory, fd)
+    mj_dump(memory, nbytes)
+    mj_exec(memory, regs)
 
-if __name__ == "__main__":
+
+    
+if __name__ == "__main__":    
+    machine_memory = [0] * MEMORY_SIZE # We MUST reserve real memory for a VM    
+    machine_regs = dict( # Machine state (currently a dict for compatibility with JSON)
+        RN=0, # type: int # LONG  # instruction register
+        BN=0, # type: int # SHORT # instruction counter register 
+        AK=0, # type: int # LONG  # accumulation register 
+        ARM=0, # type: int # SHORT # read-from-memory register
+        PRM=0, # type: int # LONG  # write-to-memory register
+        XN=[0] * 15 # indexed-addressing registers
+    )
+    
     try:
         BOOT_INIT_PROGRAM = sys.argv[1]
     except Exception as exc:
         raise Exception(exc)
 
     with open(BOOT_INIT_PROGRAM, "r+b") as vrom:
-        mj_bios(vmem, vstate, vrom)
-        sys.stderr.write(str(vstate))
+        mj_bios(machine_memory, machine_regs, vrom)
+        sys.stderr.write(str(machine_regs))
