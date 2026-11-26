@@ -118,21 +118,29 @@ def tokenize(statement, memmap, opconfig):
     definition/reference implementation.
     """
     mmap = memmap
-    expression = ""
-    lhand = ""
-    rhand = ""
-    output = ""
+    expression = "" # HLS: identifier | data "="? arithmetic-expression?
+    lhand = "" # HLS: identifier | data
+    rhand = "" # HLS: arithmetic-expression
+    output = "" # ASM: mnemonic operand*
 
-    
+
+    # split each "line" of code into left-hand and right-hand
     expression = str(statement).split("=")
+    # create identifiers from left-hand part if alpha
     lhand = ''.join([c for c in expression[0] if c.isalpha()])
+    # save right
     rhand = expression[1]
 
     try:
+        # get index of identifier in mem (unique "in scope"?)
         mmap.index(lhand)        
-    except ValueError as exc:     
+    except ValueError as exc:
+        # add if not found by index()
         mmap.append(lhand)
 
+    # loop thru pairs of left-hand (identifiers, data)
+    # and postfixed right-hand arithmetic expressions (understanding
+    # operator precedence), and output mnemonic (assembly) code
     for symbol in asm(lhand, mmap, postfix(rhand, opconfig)):
         output += symbol + "\n"
         
